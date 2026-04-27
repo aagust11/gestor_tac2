@@ -1,0 +1,6 @@
+{
+  "name": "Gestor d'Inventari de Centre",
+  "description": "Aplicació web per a la gestió de dispositius, persones, assignacions i incidències d'un centre educatiu, amb persistència local en fitxers JSON i Excel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
