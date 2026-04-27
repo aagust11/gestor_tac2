@@ -5,12 +5,13 @@
 
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../store/appStore';
-import { Plus, Search, Edit2, Trash2, User, Laptop } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, User, Laptop, FileUp, Download } from 'lucide-react';
 import { Person, AssignmentStatus } from '../types';
 import { motion } from 'motion/react';
+import { csvService } from '../services/csvService';
 
 const Persones: React.FC = () => {
-  const { data, addPerson, updatePerson, deletePerson } = useApp();
+  const { data, addPerson, updatePerson, deletePerson, massAddPeople } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
@@ -25,11 +26,46 @@ const Persones: React.FC = () => {
   const filteredPeople = useMemo(() => {
     const term = searchTerm.toLowerCase();
     return data.people.filter(p => 
-      p.nom.toLowerCase().includes(term) ||
-      p.correuElectronic.toLowerCase().includes(term) ||
-      p.identificador.toLowerCase().includes(term)
-    ).sort((a, b) => a.nom.localeCompare(b.nom));
+      (p.nom || '').toLowerCase().includes(term) ||
+      (p.correuElectronic || '').toLowerCase().includes(term) ||
+      (p.identificador || '').toLowerCase().includes(term)
+    ).sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
   }, [data.people, searchTerm]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    let rows: any[] = [];
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+
+    if (isExcel) {
+      rows = await csvService.parseExcel(file);
+    } else {
+      const text = await file.text();
+      rows = csvService.parseCSV(text);
+    }
+    
+    const validPeople = rows.map((r: any) => ({
+      nom: r.nom || '',
+      correuElectronic: r.correu || r['correu electrònic'] || r.email || '',
+      identificador: r.identificador || r.id || r.dni || ''
+    })).filter(p => p.nom && p.identificador);
+    
+    if (validPeople.length > 0) {
+      await massAddPeople(validPeople as any);
+      alert(`${validPeople.length} persones importades/actualitzades amb èxit.`);
+    } else {
+      alert("No s'han trobat dades vàlides. Columnes requerides: nom, correu, identificador.");
+    }
+    
+    // Reset input
+    e.target.value = '';
+  };
+
+  const downloadTemplate = () => {
+    csvService.downloadTemplate('plantilla_persones.csv', ['nom', 'correu', 'identificador']);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,10 +104,21 @@ const Persones: React.FC = () => {
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Persones</h1>
           <p className="text-slate-500 mt-1 font-medium">Gestió d'usuaris, docents i alumnes.</p>
         </div>
-        <button onClick={() => { setIsModalOpen(true); setEditingPerson(null); }} className="btn-primary">
-          <Plus className="w-4 h-4" />
-          Nova Persona
-        </button>
+
+        <div className="flex gap-2">
+          <label className="btn-secondary cursor-pointer">
+            <FileUp className="w-4 h-4" />
+            Importar dades
+            <input type="file" accept=".csv, .xlsx, .xls" className="hidden" onChange={handleFileUpload} />
+          </label>
+          <button onClick={downloadTemplate} className="btn-secondary" title="Descarregar Plantilla CSV">
+            <Download className="w-4 h-4" />
+          </button>
+          <button onClick={() => { setIsModalOpen(true); setEditingPerson(null); }} className="btn-primary">
+            <Plus className="w-4 h-4" />
+            Nova Persona
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-col sm:flex-row gap-4 items-center mb-6">

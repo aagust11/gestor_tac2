@@ -23,18 +23,7 @@ const Dashboard: React.FC = () => {
   const recentIncidents = [...data.incidents].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4);
 
   return (
-    <div className="space-y-8 h-full flex flex-col">
-      {/* Warning Banner */}
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-4">
-        <div className="bg-blue-100 p-2 rounded-full text-blue-600 shrink-0">
-          <Info className="w-5 h-5" />
-        </div>
-        <div>
-          <h4 className="font-bold text-blue-900 text-sm">Privadesa de dades garantida</h4>
-          <p className="text-blue-800 text-[11px] mt-0.5 leading-relaxed">Les dades no s'envien a cap servidor: es desen en un JSON local al teu ordinador i el navegador només en guarda l'enllaç per reobrir-lo.</p>
-        </div>
-      </div>
-
+    <div className="space-y-8 h-full flex flex-col pt-4">
       {/* Metric Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 shrink-0">
         {metrics.map((metric, idx) => (

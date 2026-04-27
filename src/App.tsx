@@ -33,12 +33,33 @@ const ConfigurationCheck: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const isSupported = fileSystemService.isSupported();
+  const isInIframe = window.self !== window.top;
+
   if (!isSupported) {
     return (
       <div className="max-w-md mx-auto mt-20 text-center p-8 clay-card bg-red-50 border-red-100">
         <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
         <h1 className="text-xl font-bold text-red-900 mb-2">Navegador no compatible</h1>
         <p className="text-red-700">{STRINGS.BROWSER_NOT_SUPPORTED}</p>
+      </div>
+    );
+  }
+
+  // If in iframe, we cannot use showOpenFilePicker
+  if (isInIframe) {
+    return (
+      <div className="max-w-xl mx-auto mt-20 text-center p-10 clay-card border-amber-200 bg-amber-50 shadow-xl">
+        <AlertCircle className="w-16 h-16 text-amber-500 mx-auto mb-6" />
+        <h1 className="text-2xl font-black text-amber-950 mb-4 uppercase tracking-tight">Accés Restringit</h1>
+        <p className="text-amber-800 mb-8 font-medium leading-relaxed">
+          {STRINGS.IFRAME_WARNING}
+        </p>
+        <button 
+          onClick={() => window.open(window.location.href, '_blank')}
+          className="btn-primary px-8 py-4 bg-amber-600 hover:bg-amber-700 shadow-amber-200 text-lg"
+        >
+          Obrir en una pestanya nova
+        </button>
       </div>
     );
   }

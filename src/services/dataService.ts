@@ -6,6 +6,7 @@ const EMPTY_DATA: AppData = {
   people: [],
   assignments: [],
   incidents: [],
+  incidentTemplates: [],
   metadata: {
     version: '1.0.0',
     updatedAt: new Date().toISOString()
@@ -23,6 +24,10 @@ export const dataService = {
       if (!data.devices || !data.people || !data.assignments || !data.incidents) {
         return EMPTY_DATA;
       }
+      
+      // Migration for new fields
+      if (!data.incidentTemplates) data.incidentTemplates = [];
+      
       return data;
     } catch (error) {
       console.error('Error loading JSON data:', error);

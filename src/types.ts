@@ -60,11 +60,18 @@ export interface Assignment {
 export interface Incident {
   id: string;
   deviceId: string;
-  REQ: string;
+  REQ?: string;
   explicacio: string;
+  comentaris?: string;
   estat: IncidentStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IncidentTemplate {
+  id: string;
+  titol: string;
+  contingut: string;
 }
 
 export interface AppMetadata {
@@ -77,6 +84,7 @@ export interface AppData {
   people: Person[];
   assignments: Assignment[];
   incidents: Incident[];
+  incidentTemplates: IncidentTemplate[];
   metadata: AppMetadata;
 }
 

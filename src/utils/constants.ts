@@ -30,4 +30,5 @@ export const STRINGS = {
   SACE_EXISTS: "Ja existeix un dispositiu amb aquest SACE.",
   IDENTIFIER_EXISTS: "Ja existeix una persona amb aquest identificador.",
   DEVICE_ALREADY_ASSIGNED: "Aquest dispositiu ja té una assignació activa.",
+  IFRAME_WARNING: "El sistema no pot accedir als teus fitxers locals mentre l'aplicació s'executa dins d'un marc (iframe). Per motius de seguretat, cal que obris l'aplicació en una pestanya nova per poder carregar o desar el fitxer JSON d'inventari.",
 };

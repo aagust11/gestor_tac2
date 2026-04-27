@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { AppData, Device, Person, Assignment, Incident, FileHandles, DeviceStatus, AssignmentStatus, IncidentStatus, DeviceType } from '../types';
+import { AppData, Device, Person, Assignment, Incident, IncidentTemplate, FileHandles, DeviceStatus, AssignmentStatus, IncidentStatus, DeviceType } from '../types';
 import { indexedDbService } from '../services/indexedDbService';
 import { fileSystemService } from '../services/fileSystemService';
 import { dataService } from '../services/dataService';
@@ -26,11 +26,22 @@ interface AppContextType {
   addPerson: (person: Omit<Person, 'id' | 'createdAt'>) => Promise<void>;
   updatePerson: (id: string, updates: Partial<Person>) => Promise<void>;
   deletePerson: (id: string) => Promise<void>;
+  massAddPeople: (people: Omit<Person, 'id' | 'createdAt'>[]) => Promise<void>;
   
   createAssignment: (personId: string, deviceId: string, returnsOtherIds: string[]) => Promise<void>;
+  endAssignment: (assignmentId: string) => Promise<void>;
+  deleteAssignment: (id: string) => Promise<void>;
   
   addIncident: (incident: Omit<Incident, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   updateIncident: (id: string, updates: Partial<Incident>) => Promise<void>;
+  deleteIncident: (id: string) => Promise<void>;
+  
+  massAddDevices: (devices: Omit<Device, 'id' | 'createdAt' | 'updatedAt'>[]) => Promise<void>;
+  mergeDevices: (targetId: string, sourceIds: string[], finalInfo: Partial<Device>) => Promise<void>;
+  
+  addTemplate: (template: Omit<IncidentTemplate, 'id'>) => Promise<void>;
+  updateTemplate: (id: string, updates: Partial<IncidentTemplate>) => Promise<void>;
+  deleteTemplate: (id: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -136,6 +147,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const normalizeEmail = (email: string) => {
+    if (!email) return '';
+    return email.includes('@') ? email : `${email}@insmollet.cat`;
+  };
+
   // CRUD Actions
   const addDevice = async (device: Omit<Device, 'id' | 'createdAt' | 'updatedAt'>) => {
     if (data.devices.some(d => d.SACE === device.SACE)) {
@@ -144,6 +160,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const now = new Date().toISOString();
     const newDevice: Device = {
       ...device,
+      SN: device.SN.toUpperCase().trim(),
       id: crypto.randomUUID(),
       createdAt: now,
       updatedAt: now
@@ -159,6 +176,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const massAddDevices = async (devices: Omit<Device, 'id' | 'createdAt' | 'updatedAt'>[]) => {
+    const now = new Date().toISOString();
+    const devicesMap = new Map(data.devices.map(d => [d.SACE, d]));
+    const updatedDevices = [...data.devices];
+
+    for (const d of devices) {
+      const existing = devicesMap.get(d.SACE);
+      if (existing) {
+        const idx = updatedDevices.findIndex(dev => dev.id === existing.id);
+        updatedDevices[idx] = {
+          ...existing,
+          SN: d.SN.toUpperCase().trim(),
+          tipusDispositiu: d.tipusDispositiu,
+          estat: d.estat,
+          updatedAt: now
+        };
+      } else {
+        const newDevice: Device = {
+          ...d,
+          SN: d.SN.toUpperCase().trim(),
+          id: crypto.randomUUID(),
+          createdAt: now,
+          updatedAt: now
+        };
+        updatedDevices.push(newDevice);
+        devicesMap.set(d.SACE, newDevice);
+      }
+    }
+
+    await persist({ ...data, devices: updatedDevices });
+  };
+
   const updateDevice = async (id: string, updates: Partial<Device>) => {
     const oldDevice = data.devices.find(d => d.id === id);
     if (!oldDevice) return;
@@ -168,7 +217,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const now = new Date().toISOString();
-    const updatedDevice = { ...oldDevice, ...updates, updatedAt: now };
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.SN) normalizedUpdates.SN = normalizedUpdates.SN.toUpperCase().trim();
+
+    const updatedDevice = { ...oldDevice, ...normalizedUpdates, updatedAt: now };
     const newData = {
       ...data,
       devices: data.devices.map(d => d.id === id ? updatedDevice : d)
@@ -186,14 +238,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const mergeDevices = async (targetId: string, sourceIds: string[], finalInfo: Partial<Device>) => {
+    const target = data.devices.find(d => d.id === targetId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    
+    // 1. Update target device info
+    const updatedTarget = { ...target, ...finalInfo, updatedAt: now };
+    if (updatedTarget.SN) updatedTarget.SN = updatedTarget.SN.toUpperCase().trim();
+
+    // 2. Redirect all assignments and incidents from source IDs to target ID
+    const updatedAssignments = data.assignments.map(a => 
+      sourceIds.includes(a.deviceId) ? { ...a, deviceId: targetId } : a
+    );
+    const updatedIncidents = data.incidents.map(i => 
+      sourceIds.includes(i.deviceId) ? { ...i, deviceId: targetId } : i
+    );
+
+    // 3. Remove source devices
+    const updatedDevices = data.devices
+      .filter(d => !sourceIds.includes(d.id))
+      .map(d => d.id === targetId ? updatedTarget : d);
+
+    await persist({
+      ...data,
+      devices: updatedDevices,
+      assignments: updatedAssignments,
+      incidents: updatedIncidents
+    });
+  };
+
   const deleteDevice = async (id: string) => {
-    const hasAssignments = data.assignments.some(a => a.deviceId === id);
-    const hasIncidents = data.incidents.some(i => i.deviceId === id);
-    if (hasAssignments || hasIncidents) {
-      throw new Error('No es pot eliminar un dispositiu amb assignacions o incidències associades.');
+    const hasActiveAssignments = data.assignments.some(a => a.deviceId === id && a.estat === AssignmentStatus.ACTIVA);
+    if (hasActiveAssignments) {
+      throw new Error("No es pot eliminar un dispositiu que té una assignació activa. Finalitza l'assignació primer.");
     }
-    const newData = { ...data, devices: data.devices.filter(d => d.id !== id) };
-    await persist(newData);
+    
+    await persist({
+      ...data,
+      devices: data.devices.filter(d => d.id !== id),
+      // Mantenim l'historial d'incidències i assignacions encara que el dispositiu s'elimini
+    });
   };
 
   const addPerson = async (person: Omit<Person, 'id' | 'createdAt'>) => {
@@ -202,10 +288,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const newPerson: Person = {
       ...person,
+      correuElectronic: normalizeEmail(person.correuElectronic),
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString()
     };
     await persist({ ...data, people: [...data.people, newPerson] });
+  };
+
+  const massAddPeople = async (people: Omit<Person, 'id' | 'createdAt'>[]) => {
+    const now = new Date().toISOString();
+    const peopleMap = new Map(data.people.map(p => [p.identificador, p]));
+    const updatedPeople = [...data.people];
+
+    for (const p of people) {
+      const existing = peopleMap.get(p.identificador);
+      if (existing) {
+        const idx = updatedPeople.findIndex(person => person.id === existing.id);
+        updatedPeople[idx] = {
+          ...existing,
+          nom: p.nom,
+          correuElectronic: normalizeEmail(p.correuElectronic)
+        };
+      } else {
+        const newPerson: Person = {
+          ...p,
+          correuElectronic: normalizeEmail(p.correuElectronic),
+          id: crypto.randomUUID(),
+          createdAt: now
+        };
+        updatedPeople.push(newPerson);
+        peopleMap.set(p.identificador, newPerson);
+      }
+    }
+
+    await persist({ ...data, people: updatedPeople });
   };
 
   const updatePerson = async (id: string, updates: Partial<Person>) => {
@@ -214,9 +330,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (updates.identificador && updates.identificador !== old.identificador && data.people.some(p => p.identificador === updates.identificador)) {
       throw new Error('Aquest identificador ja està en ús.');
     }
+
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.correuElectronic) normalizedUpdates.correuElectronic = normalizeEmail(normalizedUpdates.correuElectronic);
+
     await persist({
       ...data,
-      people: data.people.map(p => p.id === id ? { ...p, ...updates } : p)
+      people: data.people.map(p => p.id === id ? { ...p, ...normalizedUpdates } : p)
     });
   };
 
@@ -234,23 +354,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!person || !device) throw new Error('Persona o dispositiu no trobats.');
 
     // Check if device is already assigned
-    if (data.assignments.some(a => a.deviceId === deviceId && a.estat === AssignmentStatus.ACTIVA)) {
-      throw new Error('Aquest dispositiu ja té una assignació activa.');
+    if (data.assignments.some(a => a.deviceId === deviceId && a.estat === AssignmentStatus.ACTIVA && !returnsOtherIds.includes(a.id))) {
+      throw new Error('Aquest dispositiu ja té una assignació activa que no s\'està tancant.');
     }
 
     const now = new Date().toISOString();
-    let updatedAssignments = [...data.assignments];
-    let updatedDevices = [...data.devices];
+    let updatedAssignments = JSON.parse(JSON.stringify(data.assignments));
+    let updatedDevices = JSON.parse(JSON.stringify(data.devices));
 
     // 1. Process returns
     for (const returnId of returnsOtherIds) {
-      const assignmentToFinish = updatedAssignments.find(a => a.id === returnId);
+      const assignmentToFinish = updatedAssignments.find((a: Assignment) => a.id === returnId);
       if (assignmentToFinish) {
         assignmentToFinish.estat = AssignmentStatus.FINALITZADA;
         assignmentToFinish.endedAt = now;
         
         // If the returned device was "Entregat", set to "Disponible"
-        const returnedDevice = updatedDevices.find(d => d.id === assignmentToFinish.deviceId);
+        const returnedDevice = updatedDevices.find((d: Device) => d.id === assignmentToFinish.deviceId);
         if (returnedDevice && returnedDevice.estat === DeviceStatus.ENTREGAT) {
           returnedDevice.estat = DeviceStatus.DISPONIBLE;
           returnedDevice.updatedAt = now;
@@ -276,7 +396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updatedAssignments.push(newAssignment);
 
     // 3. Update new device status to "Entregat"
-    const targetDevice = updatedDevices.find(d => d.id === deviceId);
+    const targetDevice = updatedDevices.find((d: Device) => d.id === deviceId);
     if (targetDevice) {
       targetDevice.estat = DeviceStatus.ENTREGAT;
       targetDevice.updatedAt = now;
@@ -297,6 +417,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await excelService.registerStatus(handles.excelStatuses, targetDevice.SACE, DeviceStatus.ENTREGAT);
       }
     }
+  };
+
+  const endAssignment = async (assignmentId: string) => {
+    const assignment = data.assignments.find(a => a.id === assignmentId);
+    if (!assignment || assignment.estat === AssignmentStatus.FINALITZADA) return;
+
+    const now = new Date().toISOString();
+    const updatedAssignments = data.assignments.map(a => 
+      a.id === assignmentId ? { ...a, estat: AssignmentStatus.FINALITZADA, endedAt: now } : a
+    );
+
+    const updatedDevices = data.devices.map(d => {
+      if (d.id === assignment.deviceId && d.estat === DeviceStatus.ENTREGAT) {
+        return { ...d, estat: DeviceStatus.DISPONIBLE, updatedAt: now };
+      }
+      return d;
+    });
+
+    await persist({
+      ...data,
+      assignments: updatedAssignments,
+      devices: updatedDevices
+    });
+
+    // Side effect: Excel status update
+    const dev = updatedDevices.find(d => d.id === assignment.deviceId);
+    if (dev && (dev.tipusDispositiu === DeviceType.ORDINADOR_ALUMNE || dev.tipusDispositiu === DeviceType.ORDINADOR_DOCENT)) {
+      if (handles.excelStatuses) {
+        await excelService.registerStatus(handles.excelStatuses, dev.SACE, DeviceStatus.DISPONIBLE);
+      }
+    }
+  };
+
+  const deleteAssignment = async (id: string) => {
+    await persist({
+      ...data,
+      assignments: data.assignments.filter(a => a.id !== id)
+    });
   };
 
   const addIncident = async (incident: Omit<Incident, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -339,13 +497,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const deleteIncident = async (id: string) => {
+    await persist({
+      ...data,
+      incidents: data.incidents.filter(i => i.id !== id)
+    });
+  };
+
+  const addTemplate = async (template: Omit<IncidentTemplate, 'id'>) => {
+    const newTemplate: IncidentTemplate = {
+      ...template,
+      id: crypto.randomUUID()
+    };
+    await persist({ ...data, incidentTemplates: [...data.incidentTemplates, newTemplate] });
+  };
+
+  const updateTemplate = async (id: string, updates: Partial<IncidentTemplate>) => {
+    await persist({
+      ...data,
+      incidentTemplates: data.incidentTemplates.map(t => t.id === id ? { ...t, ...updates } : t)
+    });
+  };
+
+  const deleteTemplate = async (id: string) => {
+    await persist({
+      ...data,
+      incidentTemplates: data.incidentTemplates.filter(t => t.id !== id)
+    });
+  };
+
   return (
     <AppContext.Provider value={{
       data, handles, isReady, isLoading, error,
       setJsonHandle, setExcelAssignmentsHandle, setExcelStatusesHandle, checkPermissions,
-      addDevice, updateDevice, deleteDevice,
-      addPerson, updatePerson, deletePerson,
-      createAssignment, addIncident, updateIncident
+      addDevice, updateDevice, deleteDevice, massAddDevices, mergeDevices,
+      addPerson, updatePerson, deletePerson, massAddPeople,
+      createAssignment, endAssignment, deleteAssignment, addIncident, updateIncident, deleteIncident,
+      addTemplate, updateTemplate, deleteTemplate
     }}>
       {children}
     </AppContext.Provider>

@@ -5,18 +5,26 @@
 
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../store/appStore';
-import { Plus, Search, Edit2, Trash2, Laptop, Info, History, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Laptop, Info, History, AlertTriangle, FileUp, Download, AlertCircle, Repeat, Check } from 'lucide-react';
 import { DEVICE_TYPES, DEVICE_STATUSES } from '../utils/constants';
-import { Device, DeviceType, DeviceStatus, AssignmentStatus } from '../types';
+import { Device, DeviceType, DeviceStatus, AssignmentStatus, IncidentStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { csvService } from '../services/csvService';
+import { useNavigate } from 'react-router-dom';
 
 const Dispositius: React.FC = () => {
-  const { data, addDevice, updateDevice, deleteDevice } = useApp();
+  const { data, addDevice, updateDevice, deleteDevice, massAddDevices, mergeDevices } = useApp();
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
   const [isConfirmOpen, setIsConfirmOpen] = useState<{ open: boolean; id: string }>({ open: false, id: '' });
   const [historyDevId, setHistoryDevId] = useState<string | null>(null);
+
+  // Merge State
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [duplicateGroup, setDuplicateGroup] = useState<Device[]>([]);
+  const [selectedTargetId, setSelectedTargetId] = useState<string>('');
 
   // Form state
   const [formData, setFormData] = useState({
@@ -26,13 +34,123 @@ const Dispositius: React.FC = () => {
     estat: DeviceStatus.DISPONIBLE
   });
 
+  const duplicateInfo = useMemo(() => {
+    const saceMap = new Map<string, Device[]>();
+    const snMap = new Map<string, Device[]>();
+
+    data.devices.forEach(d => {
+      const sace = d.SACE.trim();
+      const sn = d.SN.trim().toUpperCase();
+      if (sace) {
+        const val = saceMap.get(sace) || [];
+        val.push(d);
+        saceMap.set(sace, val);
+      }
+      if (sn) {
+        const val = snMap.get(sn) || [];
+        val.push(d);
+        snMap.set(sn, val);
+      }
+    });
+
+    const groups: Device[][] = [];
+    saceMap.forEach(v => { if (v.length > 1) groups.push(v); });
+    snMap.forEach(v => { if (v.length > 1) groups.push(v); });
+
+    // Deduplicate groups
+    const uniqueGroups: Device[][] = [];
+    const seenIdsString = new Set<string>();
+    groups.forEach(group => {
+      const gIds = group.map(d => d.id).sort().join(',');
+      if (!seenIdsString.has(gIds)) {
+        uniqueGroups.push(group);
+        seenIdsString.add(gIds);
+      }
+    });
+
+    return uniqueGroups;
+  }, [data.devices]);
+
+  const handleMerge = async () => {
+    if (!selectedTargetId) return;
+    const target = duplicateGroup.find(d => d.id === selectedTargetId);
+    if (!target) return;
+
+    const sourceIds = duplicateGroup.filter(d => d.id !== selectedTargetId).map(d => d.id);
+    
+    try {
+      await mergeDevices(selectedTargetId, sourceIds, {
+        SACE: target.SACE,
+        SN: target.SN,
+        tipusDispositiu: target.tipusDispositiu,
+        estat: target.estat
+      });
+      setMergeModalOpen(false);
+      setDuplicateGroup([]);
+      setSelectedTargetId('');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const filteredDevices = useMemo(() => {
-    return data.devices.filter(d => 
-      d.SACE.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.SN.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.tipusDispositiu.toLowerCase().includes(searchTerm.toLowerCase())
-    ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return data.devices.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    const term8 = term.substring(0, 8);
+    const termS8 = 's' + term8;
+
+    return data.devices.filter(d => {
+      const snLower = (d.SN || '').toLowerCase();
+      
+      // 1. Exact or partial match in SACE or Type
+      const saceMatch = (d.SACE || '').toLowerCase().includes(term);
+      const typeMatch = (d.tipusDispositiu || '').toLowerCase().includes(term);
+      
+      // 2. SN Matches
+      const snExactMatch = snLower.includes(term);
+      const sn8Match = term.length >= 8 && snLower === term8;
+      const snS8Match = term.length >= 8 && snLower === termS8;
+      
+      return saceMatch || typeMatch || snExactMatch || sn8Match || snS8Match;
+    }).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   }, [data.devices, searchTerm]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    let rows: any[] = [];
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+
+    if (isExcel) {
+      rows = await csvService.parseExcel(file);
+    } else {
+      const text = await file.text();
+      rows = csvService.parseCSV(text);
+    }
+    
+    const validDevices = rows.map((r: any) => ({
+      SACE: (r.sace || '').toString().trim(),
+      SN: (r.sn || '').toString().toUpperCase().trim(),
+      tipusDispositiu: (r.tipus || r['tipus dispositiu'] || DEVICE_TYPES[0]) as DeviceType,
+      estat: (r.estat || DeviceStatus.DISPONIBLE) as DeviceStatus
+    })).filter(d => d.SACE && d.SN);
+    
+    if (validDevices.length > 0) {
+      await massAddDevices(validDevices as any);
+      alert(`${validDevices.length} dispositius importats/actualitzades amb èxit.`);
+    } else {
+      alert("No s'han trobat dades vàlides. Columnes requerides: sace, sn, tipus, estat.");
+    }
+
+    // Reset input
+    e.target.value = '';
+  };
+
+  const downloadTemplate = () => {
+    csvService.downloadTemplate('plantilla_dispositius.csv', ['sace', 'sn', 'tipus', 'estat']);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -135,11 +253,45 @@ const Dispositius: React.FC = () => {
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Dispositius</h1>
           <p className="text-slate-500 mt-1 font-medium">Llistat i gestió de l'inventari tecnològic.</p>
         </div>
-        <button onClick={() => { setIsModalOpen(true); setEditingDevice(null); }} className="btn-primary">
-          <Plus className="w-4 h-4" />
-          Nou Dispositiu
-        </button>
+        <div className="flex gap-2">
+          <label className="btn-secondary cursor-pointer">
+            <FileUp className="w-4 h-4" />
+            Importar dades
+            <input type="file" accept=".csv, .xlsx, .xls" className="hidden" onChange={handleFileUpload} />
+          </label>
+          <button onClick={downloadTemplate} className="btn-secondary" title="Descarregar Plantilla CSV">
+            <Download className="w-4 h-4" />
+          </button>
+          <button onClick={() => { setIsModalOpen(true); setEditingDevice(null); }} className="btn-primary">
+            <Plus className="w-4 h-4" />
+            Nou Dispositiu
+          </button>
+        </div>
       </header>
+
+      {duplicateInfo.length > 0 && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-3 text-amber-800">
+            <AlertTriangle className="w-5 h-5" />
+            <div>
+              <p className="text-sm font-bold">S'han detectat {duplicateInfo.length} grups de duplicats</p>
+              <p className="text-[10px]">Hi ha dispositius amb el mateix SACE o SN en l'inventari.</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {duplicateInfo.slice(0, 3).map((group, idx) => (
+              <button 
+                key={idx}
+                onClick={() => { setDuplicateGroup(group); setMergeModalOpen(true); }}
+                className="btn-secondary py-1 text-[10px] bg-white border-amber-200 text-amber-700 hover:bg-amber-100"
+              >
+                Fusionar Grup {idx + 1}
+              </button>
+            ))}
+            {duplicateInfo.length > 3 && <span className="text-[10px] text-amber-500 self-center">...</span>}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-4 items-center mb-6">
         <div className="relative flex-grow w-full">
@@ -169,10 +321,23 @@ const Dispositius: React.FC = () => {
               <motion.tr layout key={device.id} className="hover:bg-slate-50/50 transition-colors group">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-slate-100 rounded-lg text-slate-600">
+                    <div className="p-2 bg-slate-100 rounded-lg text-slate-600 relative">
                       <Laptop className="w-4 h-4" />
+                      {data.incidents.some(i => i.deviceId === device.id && i.estat !== IncidentStatus.RESOLTA) && (
+                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-white"></span>
+                        </span>
+                      )}
                     </div>
-                    <span className="font-semibold text-slate-900">{device.tipusDispositiu}</span>
+                    <div>
+                      <span className="font-semibold text-slate-900">{device.tipusDispositiu}</span>
+                      {device.estat === DeviceStatus.ENTREGAT && (
+                        <p className="text-[10px] text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded-sm mt-0.5">
+                          {data.people.find(p => p.id === data.assignments.find(a => a.deviceId === device.id && a.estat === AssignmentStatus.ACTIVA)?.personId)?.nom || 'SENSE USUARI'}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm">
@@ -197,6 +362,9 @@ const Dispositius: React.FC = () => {
                 </td>
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => navigate('/incidencies', { state: { deviceSace: device.SACE } })} title="Obrir Incidència" className="p-2 text-slate-400 hover:text-amber-600 rounded-lg hover:bg-white border border-transparent hover:border-slate-100 transition-all">
+                      <AlertCircle className="w-4 h-4" />
+                    </button>
                     <button onClick={() => setHistoryDevId(device.id)} title="Historial" className="p-2 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-white border border-transparent hover:border-slate-100 transition-all">
                       <History className="w-4 h-4" />
                     </button>
@@ -219,6 +387,60 @@ const Dispositius: React.FC = () => {
 
       {/* History Modal */}
       {historyDevId && <DeviceHistoryModal devId={historyDevId} />}
+
+      {/* Merge Modal */}
+      {mergeModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl w-full max-w-xl p-6 space-y-6">
+            <div>
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Repeat className="w-5 h-5 text-amber-600" />
+                Fusió de Dispositius Duplicats
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Tria el dispositiu amb la informació correcte. Les incidències i assignacions de tots els duplicats es mouran a aquest.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {duplicateGroup.map(d => (
+                <button 
+                  key={d.id}
+                  onClick={() => setSelectedTargetId(d.id)}
+                  className={`w-full p-4 text-left border-2 rounded-xl transition-all flex items-center justify-between ${selectedTargetId === d.id ? 'border-blue-600 bg-blue-50/50' : 'border-slate-100 hover:border-slate-200'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${selectedTargetId === d.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      <Laptop className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-slate-900">{d.tipusDispositiu}</p>
+                      <p className="text-[10px] text-slate-500">SACE: {d.SACE} | SN: {d.SN}</p>
+                    </div>
+                  </div>
+                  {selectedTargetId === d.id && <Check className="w-5 h-5 text-blue-600" />}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-3 pt-4 border-t border-slate-100">
+              <button 
+                onClick={() => { setMergeModalOpen(false); setDuplicateGroup([]); setSelectedTargetId(''); }} 
+                className="btn-secondary flex-grow"
+              >
+                Cancel·lar
+              </button>
+              <button 
+                disabled={!selectedTargetId}
+                onClick={handleMerge} 
+                className="btn-primary flex-grow disabled:opacity-50"
+              >
+                Confirmar Fusió
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {isModalOpen && (

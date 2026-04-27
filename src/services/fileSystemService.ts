@@ -16,6 +16,9 @@ export const fileSystemService = {
       return handle;
     } catch (error) {
       if ((error as Error).name === 'AbortError') return null;
+      if ((error as Error).name === 'SecurityError') {
+        alert("El navegador impedeix l'accés a fitxers des d'una sub-finestra (iframe). Si us plau, obre l'aplicació en una pestanya nova.");
+      }
       throw error;
     }
   },
@@ -25,6 +28,9 @@ export const fileSystemService = {
       return await window.showSaveFilePicker(options);
     } catch (error) {
       if ((error as Error).name === 'AbortError') return null;
+      if ((error as Error).name === 'SecurityError') {
+        alert("El navegador impedeix l'accés a fitxers des d'una sub-finestra (iframe). Si us plau, obre l'aplicació en una pestanya nova.");
+      }
       throw error;
     }
   },
