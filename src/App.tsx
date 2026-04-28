@@ -21,7 +21,7 @@ import { STRINGS } from './utils/constants';
 import { fileSystemService } from './services/fileSystemService';
 
 const ConfigurationCheck: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isReady, isLoading, handles } = useApp();
+  const { isReady, isLoading, handles, error } = useApp();
 
   if (isLoading) {
     return (
@@ -33,7 +33,23 @@ const ConfigurationCheck: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const isSupported = fileSystemService.isSupported();
-  const isInIframe = window.self !== window.top;
+  const isInIframe = (() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
+    }
+  })();
+
+  if (error) {
+    return (
+      <div className="max-w-md mx-auto mt-20 text-center p-8 clay-card bg-red-50 border-red-100">
+        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <h1 className="text-xl font-bold text-red-900 mb-2">Error d&apos;inicialització</h1>
+        <p className="text-red-700">{error}</p>
+      </div>
+    );
+  }
 
   if (!isSupported) {
     return (
