@@ -152,6 +152,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return email.includes('@') ? email : `${email}@insmollet.cat`;
   };
 
+  const normalizeText = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    return String(value).trim();
+  };
+
   // CRUD Actions
   const addDevice = async (device: Omit<Device, 'id' | 'createdAt' | 'updatedAt'>) => {
     if (data.devices.some(d => d.SACE === device.SACE)) {
@@ -178,7 +183,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const massAddDevices = async (devices: Omit<Device, 'id' | 'createdAt' | 'updatedAt'>[]) => {
     const now = new Date().toISOString();
-    const devicesMap = new Map(data.devices.map(d => [d.SACE, d]));
+    const devicesMap = new Map<string, Device>(data.devices.map(d => [d.SACE, d]));
     const updatedDevices = [...data.devices];
 
     for (const d of devices) {
@@ -283,12 +288,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addPerson = async (person: Omit<Person, 'id' | 'createdAt'>) => {
-    if (data.people.some(p => p.identificador === person.identificador)) {
+    const normalizedIdentificador = normalizeText(person.identificador);
+    const normalizedNom = normalizeText(person.nom);
+    const normalizedCorreu = normalizeText(person.correuElectronic);
+
+    if (!normalizedNom || !normalizedIdentificador) {
+      throw new Error('El nom i l’identificador són obligatoris.');
+    }
+
+    if (data.people.some(p => normalizeText(p.identificador) === normalizedIdentificador)) {
       throw new Error('Ja existeix una persona amb aquest identificador (nom d\'usuari/altre).');
     }
     const newPerson: Person = {
       ...person,
-      correuElectronic: normalizeEmail(person.correuElectronic),
+      nom: normalizedNom,
+      identificador: normalizedIdentificador,
+      correuElectronic: normalizeEmail(normalizedCorreu),
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString()
     };
@@ -297,27 +312,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const massAddPeople = async (people: Omit<Person, 'id' | 'createdAt'>[]) => {
     const now = new Date().toISOString();
-    const peopleMap = new Map(data.people.map(p => [p.identificador, p]));
+    const peopleMap = new Map<string, Person>(data.people.map(p => [normalizeText(p.identificador), p]));
     const updatedPeople = [...data.people];
 
     for (const p of people) {
-      const existing = peopleMap.get(p.identificador);
+      const normalizedIdentificador = normalizeText(p.identificador);
+      const normalizedNom = normalizeText(p.nom);
+      const normalizedCorreu = normalizeText(p.correuElectronic);
+      if (!normalizedNom || !normalizedIdentificador) continue;
+
+      const existing = peopleMap.get(normalizedIdentificador);
       if (existing) {
         const idx = updatedPeople.findIndex(person => person.id === existing.id);
         updatedPeople[idx] = {
           ...existing,
-          nom: p.nom,
-          correuElectronic: normalizeEmail(p.correuElectronic)
+          nom: normalizedNom,
+          identificador: normalizedIdentificador,
+          correuElectronic: normalizeEmail(normalizedCorreu)
         };
       } else {
         const newPerson: Person = {
           ...p,
-          correuElectronic: normalizeEmail(p.correuElectronic),
+          nom: normalizedNom,
+          identificador: normalizedIdentificador,
+          correuElectronic: normalizeEmail(normalizedCorreu),
           id: crypto.randomUUID(),
           createdAt: now
         };
         updatedPeople.push(newPerson);
-        peopleMap.set(p.identificador, newPerson);
+        peopleMap.set(normalizedIdentificador, newPerson);
       }
     }
 
@@ -327,12 +350,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updatePerson = async (id: string, updates: Partial<Person>) => {
     const old = data.people.find(p => p.id === id);
     if (!old) return;
-    if (updates.identificador && updates.identificador !== old.identificador && data.people.some(p => p.identificador === updates.identificador)) {
+    const normalizedIdentificador = updates.identificador !== undefined ? normalizeText(updates.identificador) : undefined;
+    if (normalizedIdentificador && normalizedIdentificador !== normalizeText(old.identificador) && data.people.some(p => normalizeText(p.identificador) === normalizedIdentificador)) {
       throw new Error('Aquest identificador ja està en ús.');
     }
 
-    const normalizedUpdates = { ...updates };
-    if (normalizedUpdates.correuElectronic) normalizedUpdates.correuElectronic = normalizeEmail(normalizedUpdates.correuElectronic);
+    const normalizedUpdates: Partial<Person> = { ...updates };
+    if (normalizedUpdates.nom !== undefined) normalizedUpdates.nom = normalizeText(normalizedUpdates.nom);
+    if (normalizedIdentificador !== undefined) normalizedUpdates.identificador = normalizedIdentificador;
+    if (normalizedUpdates.correuElectronic !== undefined) normalizedUpdates.correuElectronic = normalizeEmail(normalizeText(normalizedUpdates.correuElectronic));
 
     await persist({
       ...data,
