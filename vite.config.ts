@@ -4,6 +4,9 @@ import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
+
+  base: '/gestor_tac2/',
+
   const env = loadEnv(mode, '.', '');
   return {
     base: './',
