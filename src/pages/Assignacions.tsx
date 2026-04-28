@@ -30,6 +30,8 @@ const Assignacions: React.FC = () => {
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
   const [newDeviceData, setNewDeviceData] = useState({ SACE: '', SN: '', tipusDispositiu: 'ORDINADOR_ALUMNE' as any, estat: 'DISPONIBLE' as any });
 
+  const safeLower = (value: unknown) => String(value ?? '').toLowerCase();
+
   const handleQuickAddPerson = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -59,22 +61,23 @@ const Assignacions: React.FC = () => {
   };
 
   // Search Results
-  const personResults = personQuery.length > 1 
-    ? data.people.filter(p => 
-        (p.nom || '').toLowerCase().includes(personQuery.toLowerCase()) || 
-        (p.identificador || '').toLowerCase().includes(personQuery.toLowerCase())
-      ).slice(0, 5) 
-    : [];
+  const personResults = useMemo(() => {
+    if (personQuery.length <= 1) return [];
+    const term = safeLower(personQuery);
+    return data.people
+      .filter(p => safeLower(p.nom).includes(term) || safeLower(p.identificador).includes(term))
+      .slice(0, 5);
+  }, [data.people, personQuery]);
 
   const deviceResults = useMemo(() => {
     if (deviceQuery.length < 2) return [];
-    const term = deviceQuery.toLowerCase().trim();
+    const term = safeLower(deviceQuery).trim();
     const term8 = term.substring(0, 8);
     const termS8 = 's' + term8;
 
     return data.devices.filter(d => {
-      const snLower = (d.SN || '').toLowerCase();
-      const saceMatch = (d.SACE || '').toLowerCase().includes(term);
+      const snLower = safeLower(d.SN);
+      const saceMatch = safeLower(d.SACE).includes(term);
       
       const snExactMatch = snLower.includes(term);
       const sn8Match = term.length >= 8 && snLower === term8;

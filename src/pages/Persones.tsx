@@ -23,13 +23,16 @@ const Persones: React.FC = () => {
     identificador: ''
   });
 
+  const safeLower = (value: unknown) => String(value ?? '').toLowerCase();
+  const safeText = (value: unknown) => String(value ?? '');
+
   const filteredPeople = useMemo(() => {
-    const term = searchTerm.toLowerCase();
+    const term = safeLower(searchTerm);
     return data.people.filter(p => 
-      (p.nom || '').toLowerCase().includes(term) ||
-      (p.correuElectronic || '').toLowerCase().includes(term) ||
-      (p.identificador || '').toLowerCase().includes(term)
-    ).sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+      safeLower(p.nom).includes(term) ||
+      safeLower(p.correuElectronic).includes(term) ||
+      safeLower(p.identificador).includes(term)
+    ).sort((a, b) => safeText(a.nom).localeCompare(safeText(b.nom)));
   }, [data.people, searchTerm]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
