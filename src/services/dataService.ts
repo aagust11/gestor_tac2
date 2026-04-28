@@ -20,15 +20,29 @@ export const dataService = {
       if (!content.trim()) return EMPTY_DATA;
       
       const data = JSON.parse(content);
-      // Basic structure validation
-      if (!data.devices || !data.people || !data.assignments || !data.incidents) {
+      if (!data || typeof data !== 'object') {
         return EMPTY_DATA;
       }
-      
-      // Migration for new fields
-      if (!data.incidentTemplates) data.incidentTemplates = [];
-      
-      return data;
+
+      const safeData: AppData = {
+        devices: Array.isArray(data.devices) ? data.devices : [],
+        people: Array.isArray(data.people) ? data.people : [],
+        assignments: Array.isArray(data.assignments) ? data.assignments : [],
+        incidents: Array.isArray(data.incidents) ? data.incidents : [],
+        incidentTemplates: Array.isArray(data.incidentTemplates) ? data.incidentTemplates : [],
+        metadata: {
+          version:
+            data.metadata && typeof data.metadata.version === 'string'
+              ? data.metadata.version
+              : EMPTY_DATA.metadata.version,
+          updatedAt:
+            data.metadata && typeof data.metadata.updatedAt === 'string'
+              ? data.metadata.updatedAt
+              : new Date().toISOString(),
+        },
+      };
+
+      return safeData;
     } catch (error) {
       console.error('Error loading JSON data:', error);
       return EMPTY_DATA;
